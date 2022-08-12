@@ -105,7 +105,6 @@ namespace WAFSummaryApps
                     newSummarySlide.Shapes[10].X= (int)summBarScore;
                 }
                 var outboundBlob = new BlobAttribute($"powerpoint/{outputBlobName}", FileAccess.Write);
-                //ppt.Position = 0;
 
                 presentation.SaveAs(memFinalPresentation);
 
@@ -115,12 +114,7 @@ namespace WAFSummaryApps
                     memFinalPresentation.Position = 0;
                     writer.Write(memFinalPresentation.ToArray());
                 };
-                //ppt.Close();
-                //presentation.SaveAs(dummyppt);
-                //memPresentation.Close();
-                //memPresentation.Dispose();
-                //memTemplate.Close();
-                //memTemplate.Dispose();
+                
             }
             catch (Exception e)
             {
