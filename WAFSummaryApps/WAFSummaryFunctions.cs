@@ -1,8 +1,10 @@
 using CsvHelper;
+using DocumentFormat.OpenXml.Presentation;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.WebJobs;
 using Microsoft.Azure.WebJobs.Extensions.Http;
 using Microsoft.Extensions.Logging;
+using ShapeCrawler;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -24,48 +26,125 @@ namespace WAFSummaryApps
             IBinder pptBinder,
             ILogger log)
         {
-            Dictionary<string, PillarInfo> pillarInfo = null;
+            Dictionary<string, PillarInfo> pillarInfoList = null;
+            var outputBlobName = $"WAFSummary{DateTime.Today:ddMMyyyyHHss}.pptx";
 
             var categoryDescriptions = GetCategoryDescription(csvDescription);
 
             string fileContent = GetContent(csvWAF);
             var wafRecords = GetWafRecords(fileContent);
+            wafRecords.ForEach(r =>
+            {
+                if (string.IsNullOrWhiteSpace(r.ReportingCategory))
+                {
+                    r.ReportingCategory = "Uncategorized";
+                }
+            });
             var pillars = categoryDescriptions.Select(r => r.Pillar).Distinct().ToList();
 
             //Init Pillar Info
-            pillarInfo = InitPillarInfo(pillars);
+            pillarInfoList = InitPillarInfo(pillars);
 
 
             string overallScore = string.Empty;
-            GetPillarScore(pillarInfo, fileContent, out overallScore);
-            GetPillarDescription(pillarInfo, categoryDescriptions,pillars);
+            GetPillarScore(pillarInfoList, fileContent, out overallScore);
+            GetPillarDescription(pillarInfoList, categoryDescriptions, pillars);
 
-            var outputBlobName = $"WAFSummary{DateTime.Today:ddMMyyyy}.pptx";
-            var outboundBlob = new BlobAttribute($"powerpoint/{outputBlobName}", FileAccess.Write);
-            using (var ppt = new StreamWriter(pptBinder.Bind<Stream>(outboundBlob)))
+            //Dulication
+            IPresentation presentation = null;
+            IPresentation template = null;
+
+            MemoryStream memPresentation = new MemoryStream();
+            MemoryStream memTemplate = new MemoryStream();
+            MemoryStream memFinalPresentation = new MemoryStream();
+
+            try
             {
-                await ppt.WriteLineAsync("hello");
+                //Create the streams.
+                pptTemplate.Position = 0;
+                pptTemplate.CopyTo(memPresentation);
+                pptTemplate.Position = 0;
+                pptTemplate.CopyTo(memTemplate);
+
+                memPresentation.Position = 0;
+                memTemplate.Position = 0;
+
+                template = SCPresentation.Open(memTemplate, true);
+                presentation = SCPresentation.Open(memPresentation, true);
+
+
+                var titleSlide = template.Slides[7];
+                var summarySlide = template.Slides[8];
+                var detailSlide = template.Slides[9];
+                var endSlide = template.Slides[10];
+
+                var title = "Well-Architected [pillar] Assessment";
+                var reportDate = DateTime.Today.ToString("yyyy-MM-dd-HHmm");
+                var localReportDate = DateTime.Today.ToString("g");
+
+                foreach (var pillar in pillars)
+                {
+                    var pillarData = wafRecords.Where(r => r.Category.Equals(pillar)).ToList();
+                    var pillarInfo = pillarInfoList[pillar];
+
+                    var slideTitle = title.Replace("[pillar]", pillar.Substring(0, 1).ToUpper() + pillar.Substring(1).ToLower());
+                    //Duplicate and add.
+                    ISlide newTitleSlide = titleSlide;
+                    //Adding new slide
+                    presentation.Slides.Insert(presentation.Slides.Count,newTitleSlide);
+                    ((IAutoShape)newTitleSlide.Shapes[2]).TextBox.Text = slideTitle;
+                    ((IAutoShape)newTitleSlide.Shapes[3]).TextBox.Text = localReportDate;
+                }
+                var outboundBlob = new BlobAttribute($"powerpoint/{outputBlobName}", FileAccess.Write);
+                //ppt.Position = 0;
+
+                presentation.SaveAs(memFinalPresentation);
+                presentation.Close();
+
+                using (var writer = pptBinder.Bind<Stream>(outboundBlob))
+                {
+                    memFinalPresentation.Position = 0;
+
+                    //ppt.CopyTo(writer);
+                    //template.SaveAs(writer);
+                    writer.Write(memFinalPresentation.ToArray());
+                };
+                //ppt.Close();
+                //presentation.SaveAs(dummyppt);
+                //memPresentation.Close();
+                //memPresentation.Dispose();
+                //memTemplate.Close();
+                //memTemplate.Dispose();
             }
+            catch (Exception e)
+            {
+                throw;
+            }
+            //using (var ppt = new StreamWriter(pptBinder.Bind<Stream>(outboundBlob)))
+            //{
+            //    await ppt.Write()
+            //}
             log.LogInformation("C# HTTP trigger function processed a request.");
             //string requestBody = await new StreamReader(csv.Content).ReadToEndAsync();
             //dynamic data = JsonConvert.SerializeObject(csvContent.Path);
             return new OkObjectResult($"powerpoint/{outputBlobName}");
+
         }
 
-        
+
 
         private void GetPillarDescription(Dictionary<string, PillarInfo> pillarInfo, IEnumerable<WafCategoryDescription> categoryDescriptions, List<string> pillars)
         {
-            foreach(var pillar in pillars)
+            foreach (var pillar in pillars)
             {
                 pillarInfo[pillar].Description = categoryDescriptions
-                  .Where(d=> d.Pillar.Contains(pillar) && d.Category.Equals("Survey Level Group")).Select(d=>d.Description).FirstOrDefault();
+                  .Where(d => d.Pillar.Contains(pillar) && d.Category.Equals("Survey Level Group")).Select(d => d.Description).FirstOrDefault();
             }
         }
 
         private Dictionary<string, PillarInfo> InitPillarInfo(List<string> pillars)
         {
-            Dictionary<string, PillarInfo> pillarInfo  = new Dictionary<string, PillarInfo>();
+            Dictionary<string, PillarInfo> pillarInfo = new Dictionary<string, PillarInfo>();
             foreach (var pillar in pillars)
             {
                 pillarInfo.Add(pillar, new PillarInfo() { Name = pillar });
@@ -118,17 +197,8 @@ namespace WAFSummaryApps
             return reader.ReadToEnd();
         }
 
-        //private IEnumerable<WAFRecord> GetWafRecords(Stream csvWAF)
-        //{
-        //    using var r = new StreamReader(csvWAF,System.Text.Encoding.ASCII);
-        //    var csvContent = r.ReadToEnd();
-        //    int start = csvContent.IndexOf("Category,Link-Text,Link,Priority,ReportingCategory,ReportingSubcategory,Weight,Context");
-        //    int end = csvContent.IndexOf("-----------,,,,,");
-        //    string test = csvContent[start..end];
-        //    using var reader = new StringReader(test);
-        //    using var csv = new CsvReader(reader, CultureInfo.InvariantCulture);
-        //    return csv.GetRecords<WAFRecord>();
-        //}
+
+
         private List<WAFRecord> GetWafRecords(string csvContent)
         {
             int start = csvContent.IndexOf("Category,Link-Text,Link,Priority,ReportingCategory,ReportingSubcategory,Weight,Context");
