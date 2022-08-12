@@ -11,6 +11,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using WAFSummaryApps.Extentions;
 using WAFSummaryApps.Models;
 
 namespace WAFSummaryApps
@@ -88,25 +89,30 @@ namespace WAFSummaryApps
                     var pillarInfo = pillarInfoList[pillar];
 
                     var slideTitle = title.Replace("[pillar]", pillar.Substring(0, 1).ToUpper() + pillar.Substring(1).ToLower());
-                    //Duplicate and add.
-                    ISlide newTitleSlide = titleSlide;
-                    //Adding new slide
-                    presentation.Slides.Insert(presentation.Slides.Count,newTitleSlide);
-                    ((IAutoShape)newTitleSlide.Shapes[2]).TextBox.Text = slideTitle;
-                    ((IAutoShape)newTitleSlide.Shapes[3]).TextBox.Text = localReportDate;
+
+                    presentation.Slides.Add(titleSlide);
+                    ISlide newTitleSlide = presentation.Slides[presentation.Slides.Count - 1];
+                    newTitleSlide.AutoShape(2).TextBox.Text = slideTitle;
+                    newTitleSlide.AutoShape(3).TextBox.Text = newTitleSlide.AutoShape(3).TextBox.Text.Replace("[Report_Date]", localReportDate);
+
+                    //Add logic to get overall score
+                     presentation.Slides.Add(summarySlide);
+                    ISlide newSummarySlide = presentation.Slides[presentation.Slides.Count - 1];
+
+                    newSummarySlide.AutoShape(2).TextBox.Text = pillarInfo.Score.ToZeroIfNullorEmpty();
+                    newSummarySlide.AutoShape(3).TextBox.Text = pillarInfo.Description;
+                    var summBarScore = int.Parse(pillarInfo.Score.ToZeroIfNullorEmpty()) * 2.47 + 56;
+                    newSummarySlide.Shapes[10].X= (int)summBarScore;
                 }
                 var outboundBlob = new BlobAttribute($"powerpoint/{outputBlobName}", FileAccess.Write);
                 //ppt.Position = 0;
 
                 presentation.SaveAs(memFinalPresentation);
-                presentation.Close();
+
 
                 using (var writer = pptBinder.Bind<Stream>(outboundBlob))
                 {
                     memFinalPresentation.Position = 0;
-
-                    //ppt.CopyTo(writer);
-                    //template.SaveAs(writer);
                     writer.Write(memFinalPresentation.ToArray());
                 };
                 //ppt.Close();
@@ -120,15 +126,18 @@ namespace WAFSummaryApps
             {
                 throw;
             }
-            //using (var ppt = new StreamWriter(pptBinder.Bind<Stream>(outboundBlob)))
-            //{
-            //    await ppt.Write()
-            //}
-            log.LogInformation("C# HTTP trigger function processed a request.");
-            //string requestBody = await new StreamReader(csv.Content).ReadToEndAsync();
-            //dynamic data = JsonConvert.SerializeObject(csvContent.Path);
-            return new OkObjectResult($"powerpoint/{outputBlobName}");
+            finally
+            {
 
+                presentation.Close();
+                template.Close();
+                memPresentation.Dispose();
+                memTemplate.Dispose();
+                memFinalPresentation.Dispose();
+            }
+
+            log.LogInformation("C# HTTP trigger function processed a request.");
+            return new OkObjectResult($"powerpoint/{outputBlobName}");
         }
 
 
