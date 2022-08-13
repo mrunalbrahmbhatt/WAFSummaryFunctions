@@ -4,7 +4,7 @@ namespace WAFSummaryApps.Extentions
 {
     public static class SlideExtentions
     {
-        public static IAutoShape AutoShape(this ISlide slide, int slideNumber)
+        public static IAutoShape AsAutoShape(this ISlide slide, int slideNumber)
         {
             return (IAutoShape)slide.Shapes[slideNumber];
         }

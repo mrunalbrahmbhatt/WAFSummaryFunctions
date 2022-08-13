@@ -5,6 +5,7 @@ using Microsoft.Azure.WebJobs;
 using Microsoft.Azure.WebJobs.Extensions.Http;
 using Microsoft.Extensions.Logging;
 using ShapeCrawler;
+using ShapeCrawler.Shapes;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -92,17 +93,99 @@ namespace WAFSummaryApps
 
                     presentation.Slides.Add(titleSlide);
                     ISlide newTitleSlide = presentation.Slides[presentation.Slides.Count - 1];
-                    newTitleSlide.AutoShape(2).TextBox.Text = slideTitle;
-                    newTitleSlide.AutoShape(3).TextBox.Text = newTitleSlide.AutoShape(3).TextBox.Text.Replace("[Report_Date]", localReportDate);
+                    newTitleSlide.AsAutoShape(2).TextBox.Text = slideTitle;
+                    newTitleSlide.AsAutoShape(3).TextBox.Text = newTitleSlide.AsAutoShape(3).TextBox.Text.Replace("[Report_Date]", localReportDate);
 
                     //Add logic to get overall score
-                     presentation.Slides.Add(summarySlide);
+                    presentation.Slides.Add(summarySlide);
                     ISlide newSummarySlide = presentation.Slides[presentation.Slides.Count - 1];
 
-                    newSummarySlide.AutoShape(2).TextBox.Text = pillarInfo.Score.ToZeroIfNullorEmpty();
-                    newSummarySlide.AutoShape(3).TextBox.Text = pillarInfo.Description;
-                    var summBarScore = int.Parse(pillarInfo.Score.ToZeroIfNullorEmpty()) * 2.47 + 56;
-                    newSummarySlide.Shapes[10].X= (int)summBarScore;
+                    newSummarySlide.AsAutoShape(2).TextBox.Text = pillarInfo.Score.ToZeroIfNullorEmpty();
+                    newSummarySlide.AsAutoShape(3).TextBox.Text = pillarInfo.Description;
+                    var summBarScore = int.Parse(pillarInfo.Score.ToZeroIfNullorEmpty()) * 3.35 + 72;
+                    newSummarySlide.Shapes[10].X = (int)summBarScore;
+
+                    List<CategoryListItem> categoryListItems = new List<CategoryListItem>();
+
+                    var categorys = pillarData
+                        .OrderByDescending(p => p.Weight)
+                        .Select(p => p.ReportingCategory)
+                        .Distinct()
+                        .ToList();
+
+                    foreach (var category in categorys)
+                    {
+                        var weight = pillarData
+                            .Where(p => p.ReportingCategory.Equals(category))
+                            .Select(p => p.Weight).Sum();
+                        var count = pillarData
+                            .Where(p => p.ReportingCategory.Equals(category))
+                            .Count();
+                        var score = weight / count;
+
+                        var weightiestCount = pillarData
+                            .Where(p => p.ReportingCategory.Equals(category) && weight >= 0) //MinimumReportLevel is missing
+                            .Count();
+
+                        categoryListItems.Add(new CategoryListItem
+                        {
+                            Category = category,
+                            Score = score,
+                            WeightCount = weightiestCount
+                        });
+
+                    }
+
+                    categoryListItems = categoryListItems.OrderByDescending(c => c.Score).ToList();
+
+                    int counter = 13;//Shape count for the slide to start adding scores
+                    var categoryCounter = 0;
+                    var areaIconX = 378.1129;
+                    var areaIconY = new double[] { 176.4359, 217.6319, 258.3682, 299.1754, 339.8692, 382.6667, 423.9795, 461.0491 };
+
+
+
+                    foreach (var category in categoryListItems)
+                    {
+                        if (category.Category != "Uncategorized")
+                        {
+                            try
+                            {
+                                //$newSummarySlide.Shapes[8] #Domain 1 Icon
+                                newSummarySlide.AsAutoShape(counter).TextBox.Text = category.WeightCount.ToString("#");
+                                newSummarySlide.AsAutoShape(counter + 1).TextBox.Text = category.Category;
+                                counter += 3;
+                                IShape categoryShape = null;
+
+
+                                if (category.Score < 33)
+                                {
+                                    categoryShape = summarySlide.Shapes[37];
+                                }
+                                else if (category.Score > 33 && category.Score < 67)
+                                {
+                                    categoryShape = summarySlide.Shapes[38];
+                                }
+                                else if (category.Score > 67)
+                                {
+                                    categoryShape = summarySlide.Shapes[39];
+                                }
+                                else
+                                {
+                                    categoryShape = summarySlide.Shapes[38];
+                                }
+
+                                newSummarySlide.Shapes.Append(categoryShape);
+                                var newShapeIndex = newSummarySlide.Shapes.Count - 1;
+                                newSummarySlide.Shapes[newShapeIndex].Y = (int)areaIconX;
+                                newSummarySlide.Shapes[newShapeIndex].X = (int)areaIconY[categoryCounter];
+                                categoryCounter++;
+                            }
+                            catch { }
+                        }
+                    }
+
+                    break;
                 }
                 var outboundBlob = new BlobAttribute($"powerpoint/{outputBlobName}", FileAccess.Write);
 
@@ -114,7 +197,7 @@ namespace WAFSummaryApps
                     memFinalPresentation.Position = 0;
                     writer.Write(memFinalPresentation.ToArray());
                 };
-                
+
             }
             catch (Exception e)
             {
